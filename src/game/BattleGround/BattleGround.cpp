@@ -629,18 +629,43 @@ void BattleGround::EndBattleGround(Team winner)
     WorldPacket data;
     int32 winmsg_id = 0;
 
+    static SqlStatementID insPvPstatsBattleground;
+    static SqlStatementID insPvPstatsPlayer;
+    SqlStatement stmt = CharacterDatabase.CreateStatement(insPvPstatsBattleground, "INSERT INTO pvpstats_battlegrounds (id, winner_faction, bracket_id, type, date) VALUES (?, ?, ?, ?, NOW())");
+    QueryResult * result;
+    uint64 battleground_id = 1;
+    uint32 winner_faction = 2;
+    
+    if (isBattleGround() && sWorld.getConfig(CONFIG_BOOL_BATTLEGROUND_STORE_STATISTICS_ENABLE))
+    {
+        result = CharacterDatabase.Query("SELECT MAX(id) FROM pvpstats_battlegrounds");
+
+        if (result)
+        {
+            Field* fields = result->Fetch();
+            battleground_id = fields[0].GetUInt64() + 1;
+        }
+    }
+
     if (winner == ALLIANCE)
     {
         winmsg_id = isBattleGround() ? LANG_BG_A_WINS : LANG_ARENA_GOLD_WINS;
 
         PlaySoundToAll(SOUND_ALLIANCE_WINS);                // alliance wins sound
+        
+        winner_faction = 1;
     }
     else if (winner == HORDE)
     {
         winmsg_id = isBattleGround() ? LANG_BG_H_WINS : LANG_ARENA_GREEN_WINS;
 
         PlaySoundToAll(SOUND_HORDE_WINS);                   // horde wins sound
+        
+        winner_faction = 0;
     }
+
+    if (isBattleGround() && sWorld.getConfig(CONFIG_BOOL_BATTLEGROUND_STORE_STATISTICS_ENABLE))
+        stmt.PExecute(battleground_id, winner_faction, m_BracketId + 1, (uint8)GetTypeID());
 
     SetWinner(winner);
 
@@ -712,7 +737,7 @@ void BattleGround::EndBattleGround(Team winner)
 
         // this line is obsolete - team is set ALWAYS
         // if(!team) team = plr->GetTeam();
-
+        
         // per player calculation
         if (isArena() && isRated() && winner_arena_team && loser_arena_team)
         {
@@ -720,6 +745,26 @@ void BattleGround::EndBattleGround(Team winner)
                 winner_arena_team->MemberWon(plr, loser_rating);
             else
                 loser_arena_team->MemberLost(plr, winner_rating);
+        }
+        
+        if (isBattleGround() && sWorld.getConfig(CONFIG_BOOL_BATTLEGROUND_STORE_STATISTICS_ENABLE))
+        {
+            BattleGroundScoreMap::iterator score = m_PlayerScores.find(itr->first);
+            SqlStatement stmt = CharacterDatabase.CreateStatement(insPvPstatsPlayer, "INSERT INTO pvpstats_players (battleground_id, character_guid, score_killing_blows, score_deaths, score_honorable_kills, score_bonus_honor, score_damage_done, score_healing_done, attr_1, attr_2, attr_3, attr_4, attr_5) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+            stmt.addUInt32(battleground_id);
+            stmt.addUInt32(plr->GetGUIDLow());
+            stmt.addUInt32(score->second->GetKillingBlows());
+            stmt.addUInt32(score->second->GetDeaths());
+            stmt.addUInt32(score->second->GetHonorableKills());
+            stmt.addUInt32(score->second->GetBonusHonor());
+            stmt.addUInt32(score->second->GetDamageDone());
+            stmt.addUInt32(score->second->GetHealingDone());
+            stmt.addUInt32(score->second->GetAttr1());
+            stmt.addUInt32(score->second->GetAttr2());
+            stmt.addUInt32(score->second->GetAttr3());
+            stmt.addUInt32(score->second->GetAttr4());
+            stmt.addUInt32(score->second->GetAttr5());
+            stmt.Execute();
         }
 
         if (team == winner)
